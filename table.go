@@ -23,6 +23,37 @@ type Table[T any] struct {
 	strct *sqlbuilder.Struct
 }
 
+func (t *Table[T]) Count(ctx context.Context, builder ...SelectBuilder) (uint64, error) {
+	tx, err := t.Txer.Context(ctx)
+	if err != nil {
+		return 0, err
+	}
+
+	sb := sqlbuilder.PostgreSQL.NewSelectBuilder()
+	sb.Select(sb.As("count(*)", "c")).From(t.Name)
+
+	if len(builder) > 0 {
+		builder[0](sb)
+	}
+
+	qs, args := sb.Build()
+	t.log().Debug("select", "query", qs, "args", args)
+
+	rows, err := tx.Underlying().Query(ctx, qs, args...)
+	if err != nil {
+		return 0, errors.Join(err, tx.Rollback(ctx))
+	}
+
+	count, err := pgx.CollectOneRow(rows, func(row pgx.CollectableRow) (uint64, error) {
+		var n uint64
+		err := row.Scan(&n)
+
+		return n, err
+	})
+
+	return count, err
+}
+
 func (t *Table[T]) FindAll(ctx context.Context, builder ...SelectBuilder) ([]T, error) {
 	tx, err := t.Txer.Context(ctx)
 	if err != nil {
